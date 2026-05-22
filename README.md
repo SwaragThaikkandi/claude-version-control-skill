@@ -60,19 +60,88 @@ cd claude-version-control-skill
 
 The installer copies `SKILL.md` and `vclog.py` to `~/.claude/skills/version-control/`. Claude Code auto-discovers skills from that directory.
 
-### 3. Verify
+## Setting your passphrase
 
-```bash
-mkdir vctest && cd vctest
-python ~/.claude/skills/version-control/vclog.py init
-VCLOG_PASS='your-passphrase' python ~/.claude/skills/version-control/vclog.py save --version 1 <<< 'hello world'
-VCLOG_PASS='your-passphrase' python ~/.claude/skills/version-control/vclog.py read --version 1
-# -> hello world
-VCLOG_PASS='wrong-pass'      python ~/.claude/skills/version-control/vclog.py read --version 1
-# -> decrypt failed — wrong passphrase or block tampered.   (exit 12)
+> **There is no "set password" command.** The passphrase is whatever you supply via the `VCLOG_PASS` environment variable on your *first* `save` in a given working directory. Every subsequent `save` or `read` in that directory must use the same passphrase. The skill never stores it.
+>
+> If you supply a different passphrase later, you will not get an error on `save` (a new block will be appended, sealed with the new key) — but you will then be unable to decrypt either the old or the new blocks consistently. **Use one passphrase per `.versions.log`, forever.**
+
+### How the passphrase is used
+
+1. You set `VCLOG_PASS` in your shell for the duration of one helper command.
+2. `vclog.py` runs `scrypt(passphrase, salt-from-.versions.salt)` to derive a 32-byte AES key.
+3. That key encrypts (on `save`) or decrypts (on `read`) the block.
+4. The shell process exits; `VCLOG_PASS` dies with it.
+
+Nothing about the passphrase touches disk. **There is no recovery.** Lose it → the log is unreadable forever.
+
+### Picking a good passphrase
+
+| Strength | Example | When OK |
+|---|---|---|
+| Strong (Recommended) | 4–6 random words, e.g. `flax-meridian-obsidian-quartz` | Default. Easy to type, ~50–75 bits entropy. |
+| Strong (alt) | 16+ random characters from a password manager | When you'll always copy/paste. |
+| Weak | a real word, a date, a name | Never. scrypt slows brute force but doesn't stop it for low-entropy guesses. |
+
+PowerShell one-liner to generate one (uses cryptographic RNG):
+
+```powershell
+$words = @('correct','horse','battery','staple','river','stone','plum','axis','copper','quartz','umbra','vellum','ochre','meridian','obsidian','flax','tundra','willow','cobalt','marrow','helix','arcade','vesper','onyx')
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$buf = New-Object byte[] 4
+1..4 | ForEach-Object { $rng.GetBytes($buf); $words[[BitConverter]::ToUInt32($buf,0) % $words.Count] } | Join-String -Separator '-'
 ```
 
-(PowerShell uses `$env:VCLOG_PASS = '...'; python ... ; Remove-Item Env:VCLOG_PASS` instead of inline `VAR=` prefix.)
+Run it, read the output, write it down somewhere safe (password manager) — **do not paste it back into any chat or commit it to any file.**
+
+### Verify your passphrase works (round-trip test)
+
+Open a fresh terminal — the test runs against a throwaway directory so it can't touch any real `.versions.log`.
+
+**PowerShell:**
+
+```powershell
+mkdir $HOME\vctest -Force | Out-Null
+Set-Location $HOME\vctest
+python "$HOME\.claude\skills\version-control\vclog.py" init
+
+# Read passphrase invisibly — characters won't echo to the screen.
+$env:VCLOG_PASS = [System.Net.NetworkCredential]::new("", (Read-Host -AsSecureString "Passphrase")).Password
+
+'hello encrypted world' | python "$HOME\.claude\skills\version-control\vclog.py" save --version 1
+python "$HOME\.claude\skills\version-control\vclog.py" read --version 1
+# Expect: hello encrypted world
+
+# Clear and clean up
+Remove-Item Env:VCLOG_PASS
+Set-Location $HOME
+Remove-Item -Recurse -Force $HOME\vctest
+```
+
+**Bash (macOS / Linux / Git Bash):**
+
+```bash
+mkdir -p ~/vctest && cd ~/vctest
+python ~/.claude/skills/version-control/vclog.py init
+
+# `read -s` hides input
+read -s -p "Passphrase: " VCLOG_PASS; export VCLOG_PASS; echo
+
+echo 'hello encrypted world' | python ~/.claude/skills/version-control/vclog.py save --version 1
+python ~/.claude/skills/version-control/vclog.py read --version 1
+# Expect: hello encrypted world
+
+unset VCLOG_PASS
+cd ~ && rm -rf ~/vctest
+```
+
+If `read` prints back the plaintext, your passphrase works. If it prints `decrypt failed — wrong passphrase or block tampered.` (exit 12), you typed it wrong on the second invocation — try the test again.
+
+### Using the passphrase day-to-day
+
+You don't normally set `VCLOG_PASS` yourself. When you ask Claude to *"save version, …"* or *"revert to v3"*, the skill prompts you for the passphrase in chat, scopes it to one helper invocation, and clears it. Set `VCLOG_PASS` manually only when you want to run `vclog.py` directly from your own terminal.
+
+> **Never** pass the passphrase as a CLI flag (e.g. `--passphrase '...'`). The skill deliberately refuses that path — it would expose the passphrase in `ps` listings and shell history.
 
 ## Usage with Claude Code
 
