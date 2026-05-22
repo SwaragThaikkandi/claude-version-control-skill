@@ -1,0 +1,32 @@
+# Version-control skill runtime artifacts — must never be committed.
+# These contain user data and encryption material.
+.versions.log
+.versions.idx
+.versions.salt
+.versions/
+
+# Ad-hoc test directories
+vctest/
+test/
+tmp/
+*.rev_v*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# IDEs / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local Claude-specific
+.claude/
+CLAUDE.local.md
